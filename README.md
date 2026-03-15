@@ -60,8 +60,10 @@ In order to establish a safe upper bound for stacking of floating point register
 
 $F(J_i)$ can be obtained by EASY analysis of $J_i$, returning the set union of registers accessed along each feasible path of $J_i$.
 
-$S(J_i)$ can be obtained by: $$ S(J_i) = F(J_i) \cap \bigcup_{P(J_j) < P(J_i)} F(J_j)$$
- 
+```math
+ S(J_i) = F(J_i) \cap \bigcup_{P(J_j) < P(J_i)} F(J_j)
+```
+
 That is we stack all registers that the current task ($J_i$) accesses being used by any lower priority task.
 
 This is a safe upper bound. A tighter bound may be obtained by the observation that only a single job per priority level can execute at any point it time. For this presentation we adopt the safe upper bound and leave improving the bound to future work.
