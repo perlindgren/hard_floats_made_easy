@@ -1,0 +1,23 @@
+[package]
+name = "preemption"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cortex-m = { version = "0.7.7", features = [
+    "critical-section-single-core",
+    "inline-asm",
+] }
+
+cortex-m-rt = { version = "0.7.5" }
+
+critical-section = { version = "1.2.0" }
+panic-halt = "1.0.0"
+
+[features]
+
+[profile.release]
+panic = "abort"
+opt-level = 3
+lto = true
+# codegen-units = 1
