@@ -2,15 +2,21 @@
 
 Stack optimization for the Cortex-M family of hard float supported devices.
 
-## Nested Vectored Interrupt Controller
+## Abstract
+
+In this work, we layout and implement stacking analysis for the ARM Cortex M hard float extension. Our analysis is able to exactly predict the lazy-stacking behavior under preemption. Moreover, we show that based on the analysis we can reduce the stacking overhead footprint by up to 94%, while at the same time obtain an up to 88% reduction of the CPU overhead. This is achieved by automated binary level code analysis establishing a safe upper bound for the per floating point register stacking requirement. The feasibility of the approach is validated on a real world use-case, a hard real-time sub-system for multi-channel sampling and signal processing with application to load-balancing of Electrical Vehicle charging. 
+
+## Introduction and Background
+
+### Nested Vectored Interrupt Controller
 
 The Cortex-M Nested Vectored Interrupt Controller (NVIC) supports fixed priority preemptive scheduling among interrupt handlers. To minimize latency and CPU load, caller saved registers are stacked by the hardware on interrupt entry, and de-stacked on interrupt exit. The hardware stacking operation is by itself preemptive, allowing constant time interrupt dispatch. Additionally, tail-chaining reduces the cost for cases where stacking would immediate follow a de-stacking operation. The overhead (assuming no wait-state free memory access) is 12 cycles for entry/exit respectively, which allows for best-in class performance among COTS micro-controllers. The design allows interrupt handlers to be implemented as ordinary functions, without need for special code-gen/interrupt attributes etc.
 
-## Cortex M Hard Floats
+### Cortex M Hard Floats
 
 Cores supporting hardware accelerated floating point instructions, have 32 additional 32 bit registers (S0-31), optionally configured as 16-64 bit registers (S0, S1)-(S30, S31).
 
-The Cortex-MF architecture provides hardware support for stacking the first/low 16 (S0-S15) registers on interrupt entry (and de-stacking on exit). The remaining high registers (S16-S31) are defined as callee saved register, thus stack on a need basis.
+The Cortex-MF architecture provides hardware support for stacking the first/low 16 (S0-S15) registers on interrupt entry (and de-stacking on exit). The remaining high registers (S16-S31) are defined as callee saved, thus stacked by the compiler on a need basis.
 
 However, enabling the hardware stacking feature implies a high entry/exit cost due to the high number of floating point registers. It also implies a stack size growth accordingly.
 
@@ -29,7 +35,7 @@ In this work, we will make a deep dive into code analysis based on symbolic exec
 - Fully predictable stacking overhead
 - Minimal memory and CPU overhead, by disabling the hardware stacking if favour of fine grained manual stacking/de-stacking. 
 
-## Interrupt Model
+### Interrupt Model
 
 Assume a set of tasks (or jobs) $J_1$..$J_n$, with $P(J_i)$ indicating the static priority of $J_i$. In the below figure, blue/green indicates entry and exit of corresponding implementations (Rust functions in our case). The lowest priority job(s) are implemented as single non returning function (allowing entry/exit code may be optimized out). Jobs at lowest priority level may execute asynchronously, using cooperative multi-tasking (Rust async). 
 
@@ -43,17 +49,20 @@ During execution higher priority jobs may preempt lower jobs running with lower 
 
 A hatched region indicate that job is in a preempted state. The lowest priority jobs execute in thread mode while higher priority jobs execute in handler mode on a shared stack. Stack sharing between handler and thread mode is optional.
 
-## RTIC framework
+### RTIC framework
 
 The RTIC framework provides a declarative model for real-time tasks with shared resources. In this work we focus on hard real-time systems, scheduled for single-core execution under the Stack Resource Policy. For the discussion, we assume static priority based scheduling and along with single-unit resources (as implemented by RTIC-v1), but our results straightforwardly generalize to multi-core, dynamic priorities, multi-unit (readers-writer lock) adoptions, as our findings does not rely on model restrictions implied by RTIC-v1.
 
-## The EASY tool
-
+### The EASY tool
 The Execution Analysis by SYmbolic execution (EASY) tool, performs exhaustive path exploration of RTIC v1 models by means of binary level symbolic execution. The EASY tool relies on instruction level modelling (in our case the ARM v7em with hard floats, applicable to a wide range of Cortex-M based implementations). EASY allows domain extensions, capturing code execution side effects.
 
 In this work we leverage this to record the set of floating point registers accessed along each feasible path, reachable from each entry point for the analysis.
 
 ## Hard Floats made EASY
+
+In this section we layout the design and implementation of Hard Floats made EASY, HFE in the following. 
+
+### Safe Stacking Bounds
 
 In order to establish a safe upper bound for stacking of low (caller saved) floating point registers (S0-S15) we define:
 
@@ -71,9 +80,17 @@ That is, at task entry we stack all $S_{cs}$ registers that the current task ($J
 
 This gives a safe upper bound. A tighter bound may be obtained by the observation that only a single job per priority level can execute at any point it time. For this presentation we adopt the safe upper bound and leave improving the bound to future work.
 
+### RTIC code generation
+
+The RTIC framework, parses the declarative task/resource model and performs the necessary analysis to map each task to an interrupt handler (aka. hardware task), or to a dispatcher (shared among tasks with same priority). Based on this mapping, RTIC generates an executable.
+
+In a second analysis phase we compute $S(J_i)$ by applying the EASY to an intermittent binary (generated earlier described). 
+
+The final code generation phase extend task pre-/post-ludes to implement the stacking/de-stacking of $S(J_i)$. Any further code analysis (e.g., WCET calculations), is then performed on the _final_ generated binary (effectively taking the stacking overhead into account.)
+
 The stacking/de-stacking can be implemented `VPUSH`/`VPOP`, stacking/de-stacking a consecutive numbered list of registers in $S_{cs}$. In case the set of registers to push is non-consequitive, the set can always be represented by a sequence of `VPUSH`/`VPOP` instructions. The added execution time for `VPUSH`/`VPOP` is 1 + `N` assuming no wait states (`N` being the number of registers to push/pop).
 
-## Comparison to Lazy Stacking.
+### Comparison to Lazy Stacking
 
 As already mentioned the lazy stacking proper is a poor mans solution, offering *no* advantage over the always _stack all_ strategy when it comes to worst case assumptions. To leverage the advantage of lazy stacking in a hard-real time scenario EASY based analysis will be able to successfully predict its behavior, but with the analysis at hand we can do better.
 
@@ -93,17 +110,19 @@ However in cases fixed point arithmetics do not suffice or become unwieldy and c
 
 To the remedy our solution HFE, solves both problems and implement fully predictable and provably safe software stacking.
 
+### Real-World Use-Case and Experimental Setup
+
 As an industrially relevant use case, we have developed a measurement sub-system of a commercial load balancer for Electrical Vehicle (EV) charging. In a high priority task $(A)$, we collect 12-streams of 12-bit ADC measurements, interpolated to 16 bit signed integer resolution, and for each data point (50kHz) perform a set of filtering calculations.
 
 Lower priority task $(B)$ with a 1ms periodicity we calculate RMS, and identify critical fault modes, and at lowest priority for the set of measurement tasks, we communicate aggregated values to the over-arching system at 1Hz $(C)$.
 
 Concurrently the embedded system manages other tasks at different priorities lower than $(A)$ and $(B)$. While not directly interfering with the timing critical tasks, their contributions and use of common shared resources affects the static priority SRP based scheduling, and thus are taken into account for the analysis.
 
-### Baseline Lazy Stacking
+#### Baseline Lazy Stacking
 
 Todo Measure worst case stacking cost, use stock EASY to determine response time/schedulability for the worst case assumption.
 
-### Hard Floats mode EASY
+#### Hard Floats mode EASY
 
 Todo Table of used floats in each task, manual entry exit code for POC implementation. Calculate tight response time/schedulability test for the POC.
 
