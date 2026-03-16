@@ -1,5 +1,5 @@
 [package]
-name = "preemption"
+name = "hfe"
 version = "0.1.0"
 edition = "2024"
 
@@ -14,10 +14,15 @@ cortex-m-rt = { version = "0.7.5" }
 critical-section = { version = "1.2.0" }
 panic-halt = "1.0.0"
 
+[lib]
+test = false
+doctest = false
+bench = false
+
 [features]
 
 [profile.release]
 panic = "abort"
 opt-level = 3
-lto = true
+# lto = true
 # codegen-units = 1
