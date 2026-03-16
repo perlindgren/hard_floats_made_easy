@@ -1,6 +1,6 @@
-# FP STACK, Hard Floats made EASY
+# Hard Floats made EASY
 
-Stack optimization for the Cortex-M family of hard float supported devices.
+Stack analysis and optimization for the Cortex-M family of hard float supported devices.
 
 ## Abstract
 
